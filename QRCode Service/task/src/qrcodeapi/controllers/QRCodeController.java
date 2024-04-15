@@ -14,10 +14,15 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.Map;
+import java.util.Optional;
 
 @RestController
 public class QRCodeController {
+    private static final String ERROR_CONTENTS = "Contents cannot be null or blank";
+    private static final String ERROR_SIZE = "Image size must be between 150 and 350 pixels";
+    private static final String ERROR_CORRECTION = "Permitted error correction levels are L, M, Q, H";
+    private static final String ERROR_TYPE = "Only png, jpeg and gif image types are supported";
+
     private final QRGenerator qrGenerator;
 
     public QRCodeController(QRGenerator qrGenerator) {
@@ -29,52 +34,37 @@ public class QRCodeController {
                                             @RequestParam(required = false, defaultValue = "250") int size,
                                             @RequestParam(required = false, defaultValue = "L") String correction,
                                             @RequestParam(required = false, defaultValue = "png") String type) {
-        if (contents == null || contents.trim().isEmpty()) {
-            return ResponseEntity
-                    .badRequest()
-                    .body(Map.of("error", "Contents cannot be null or blank"));
+        Optional<String> error = validateParameters(contents, size, correction, type);
+        if (error.isPresent()) {
+            return ResponseEntity.badRequest().body(error.get());
         }
-        if (size < 150 || size > 350) {
-            return ResponseEntity
-                    .badRequest()
-                    .body(Map.of("error", "Image size must be between 150 and 350 pixels"));
-        }
-        ErrorCorrectionLevel errorCorrectionLevel;
-        switch (correction) {
-            case "L":
-                errorCorrectionLevel = ErrorCorrectionLevel.L;
-                break;
-            case "M":
-                errorCorrectionLevel = ErrorCorrectionLevel.M;
-                break;
-            case "Q":
-                errorCorrectionLevel = ErrorCorrectionLevel.Q;
-                break;
-            case "H":
-                errorCorrectionLevel = ErrorCorrectionLevel.H;
-                break;
-            default:
-                return ResponseEntity
-                        .badRequest()
-                        .body(Map.of("error", "Permitted error correction levels are L, M, Q, H"));
-        }
-        if (!type.equals("png") && !type.equals("jpeg") && !type.equals("gif")) {
-            return ResponseEntity
-                    .badRequest()
-                    .body(Map.of("error", "Only png, jpeg and gif image types are supported"));
-        }
+        ErrorCorrectionLevel errorCorrectionLevel = ErrorCorrectionLevel.valueOf(correction);
 
         try (var baos = new ByteArrayOutputStream()) {
             BufferedImage qrCodeImage = qrGenerator.generateQRCodeImage(contents, size, size, errorCorrectionLevel);
             ImageIO.write(qrCodeImage, type, baos);
             byte[] bytes = baos.toByteArray();
             return ResponseEntity.ok().contentType(MediaType.parseMediaType("image/" + type)).body(bytes);
-        } catch (IOException e) {
-            // handle the IOException
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
-        } catch (WriterException e) {
-            // handle the WriterException
+        } catch (IOException | WriterException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
+    }
+
+    private Optional<String> validateParameters(String contents, int size, String correction, String type) {
+        if (contents == null || contents.trim().isEmpty()) {
+            return Optional.of(ERROR_CONTENTS);
+        }
+        if (size < 150 || size > 350) {
+            return Optional.of(ERROR_SIZE);
+        }
+        try {
+            ErrorCorrectionLevel.valueOf(correction);
+        } catch (IllegalArgumentException e) {
+            return Optional.of(ERROR_CORRECTION);
+        }
+        if (!type.equals("png") && !type.equals("jpeg") && !type.equals("gif")) {
+            return Optional.of(ERROR_TYPE);
+        }
+        return Optional.empty();
     }
 }
